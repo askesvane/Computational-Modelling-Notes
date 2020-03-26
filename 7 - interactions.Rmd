@@ -1,0 +1,169 @@
+---
+title: "7 - intercations"
+author: "Aske Qvist"
+date: "26 March 2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Chapter 7 - interactions
+
+Loading data
+```{r}
+# Packages
+library(pacman)
+p_load(rethinking, brms, tidyverse, patchwork)
+
+# Data
+data(rugged)
+d <- rugged
+
+detach(package:rethinking, unload = T)
+
+```
+
+Make data subsets
+```{r}
+
+# make log version of outcome
+d <- d %>% mutate(
+  log_gdp = log(rgdppc_2000)
+)
+
+# extract countries with GDP data
+dd <- d %>% filter(complete.cases(rgdppc_2000))
+
+# split countries into Africa and not-Africa
+d.A1 <- dd %>% filter(cont_africa == 1) # Afrika
+d.A0 <- dd %>% filter(cont_africa == 0) # not Afrika
+
+```
+
+Fit models to the two data subsets
+```{r}
+
+b7.1 <-
+  brm(data = d.A1, family = gaussian, # Afrikan data
+      log_gdp ~ 1 + rugged,
+      prior = c(prior(normal(8, 100), class = Intercept),
+                prior(normal(0, 1), class = b),
+                prior(uniform(0, 10), class = sigma)),
+      iter = 2000, warmup = 1000, chains = 4, cores = 4,
+      seed = 7)
+
+b7.2 <-
+  update(b7.1, # Not Afrikan data
+         newdata = d.A0)
+
+```
+
+Plot posterior predictions
+```{r}
+africa <- d.A1 %>%
+  ggplot(aes(x = rugged, y = log_gdp)) +
+  stat_smooth(method = "lm", fullrange = T, size = 1/2,
+              color = "firebrick4", fill = "firebrick", alpha = 1/5) +
+  geom_point(size = 1.5, color = "firebrick4", alpha = 1/2) +
+  scale_x_continuous("Rugged", limits = c(0, 55)) +
+  coord_cartesian(xlim = 0:7, ylim = 6:10) +
+  ylab("Log of GDP") +
+  theme_bw() + ggtitle("Africa") 
+  
+not_africa <- d.A0 %>%
+  ggplot(aes(x = rugged, y = log_gdp)) +
+  stat_smooth(method = "lm", fullrange = T, size = 1/2,
+              color = "firebrick4", fill = "firebrick", alpha = 1/5) +
+  geom_point(size = 1.5, color = "firebrick4", alpha = 1/2) +
+  scale_x_continuous("Rugged", limits = c(0, 55)) +
+  coord_cartesian(xlim = 0:7, ylim = 6:10) +
+  ylab("Log of GDP") +
+  theme_bw() + ggtitle("Not Africa")
+  
+
+not_africa + africa
+# slope is positive within africa but negative outside africa
+
+
+```
+
+It is better if we keep the data in the same data set. Multilevel models borrow data from the different categories in order to improve estimates in all categories - and many other reasons. But even if we added the dummy variable cont_africa, this will not solve the problem - as a normal linear regression does not account for different slopes for the categories of the dummy.
+
+# Comapre the models with/without the dummy cont_africa as predictor ( but no interaction effect)
+```{r}
+# Start with the model I made before (without the dummy cont_africa) - just with all the data
+b7.3 <-
+  update(b7.1, newdata = dd) # all data
+
+# Now the same but added is the dummy as a predictor (in the formula)
+b7.4 <-
+  update(b7.3,
+         newdata = dd,
+         formula = log_gdp ~ 1 + rugged + cont_africa) 
+
+# compute information criteria for both
+b7.3 <- add_criterion(b7.3, c("loo", "waic"))
+b7.4 <- add_criterion(b7.4, c("loo", "waic"))
+
+
+# compare IC
+loo_compare(b7.3, b7.4,
+            criterion = "waic")
+
+loo_compare(b7.3, b7.4,
+            criterion = "loo")
+# loo and waic agree - the model with the dummy fits teh data way better
+
+# compute weight
+model_weights(b7.3, b7.4,
+              weights = "waic") %>% 
+  round(digits = 3)
+# The model with the dummy has all the weight :)
+
+
+```
+
+
+# adding a linear interaction
+We want the realtionship between Y (GDP) and R (rugged) to vary as a function of A (dummy varible)
+
+(the model comparisons do not work) add_criterion() and model_weigths() when using brms.
+```{r}
+
+# Define new model with interaction effect 
+b7.5 <-
+  update(b7.4,
+         newdata = dd,
+         formula = log_gdp ~ 1 + rugged*cont_africa) # syntax as lmer()
+
+b7.5b <-
+  update(b7.4,
+         newdata = dd,
+         formula = log_gdp ~ 1 + rugged + cont_africa + rugged:cont_africa) 
+
+# add IC 
+b7.5 <- add_criterion(b7.5,c("loo","waic"))
+
+# compare all 3 models
+l <- loo_compare(b7.3, b7.4, b7.5, criterion = "waic")
+
+print(l, simplify = F)
+
+# weight
+model_weights(b7.3, b7.4, b7.5,
+              weights = "loo") %>% 
+  round(digits = 3)
+
+b7.5$loo # This is not working!
+
+```
+
+
+
+
+
+
+
+
